@@ -49,4 +49,4 @@ GPL-3.0-or-later
 
 ## Author
 
-Your Name <your.email@example.com>
+Flávio de Vasconcellos Corrêa <https://github.com/sheep-farm>
