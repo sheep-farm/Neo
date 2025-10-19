@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Neo
+Comment=Scrapy web scraping frontend
+Exec=neo
+Icon=com.github.youruser.Neo
+Terminal=false
+Type=Application
+Categories=GTK;GNOME;Development;
+StartupNotify=true
