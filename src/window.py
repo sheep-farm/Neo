@@ -2,6 +2,8 @@ from gi.repository import Gtk, Adw, GLib, Gio
 import json
 import subprocess
 import threading
+import sys
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -16,18 +18,18 @@ class NeoWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.settings = Gio.Settings.new('com.github.youruser.Neo')
         self.neo_settings = NeoSettings()
-
-        # Restore window size
-        width = self.settings.get_int('window-width')
-        height = self.settings.get_int('window-height')
-        self.set_default_size(width, height)
-
-        if self.settings.get_boolean('window-maximized'):
-            self.maximize()
-
+        self.set_default_size(1000, 700)
         self.set_title("Neo")
+
+        # DEBUG: Imprimir info do ambiente
+        self.debug_environment()
+
+        # Verificar Scrapy
+        if not self.check_scrapy_installation():
+            missing_page = self.show_scrapy_missing_page()
+            self.set_content(missing_page)
+            return
 
         # Scrapy project path
         self.project_path = Path.home() / ".config" / "neo" / "scrapy_project"
@@ -40,31 +42,86 @@ class NeoWindow(Adw.ApplicationWindow):
         self._build_ui()
         self._load_spiders()
 
-        # Connect signals
-        self.connect('close-request', self.on_close_request)
+    def debug_environment(self):
+        """Debug: print environment info"""
+        print("=" * 50)
+        print("DEBUG: Environment Information")
+        print("=" * 50)
+        print(f"Python executable: {sys.executable}")
+        print(f"Python version: {sys.version}")
 
-    def on_close_request(self, window):
-        """Save window state before closing"""
-        self.settings.set_int('window-width', self.get_width())
-        self.settings.set_int('window-height', self.get_height())
-        self.settings.set_boolean('window-maximized', self.is_maximized())
-        return False
+        try:
+            import scrapy
+            print(f"✅ Scrapy version: {scrapy.__version__}")
+            print(f"   Scrapy location: {scrapy.__file__}")
+        except ImportError as e:
+            print(f"❌ Scrapy not found: {e}")
+
+        # Testar comando
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'scrapy', 'version'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            print(f"✅ Scrapy command works:")
+            print(f"   {result.stdout.strip()}")
+        except Exception as e:
+            print(f"❌ Scrapy command failed: {e}")
+
+        print("=" * 50)
+
+    def check_scrapy_installation(self):
+        """Check if Scrapy is installed"""
+        try:
+            import scrapy
+            return True
+        except ImportError:
+            return False
+
+    def show_scrapy_missing_page(self):
+        """Show page when Scrapy is not installed"""
+        status = Adw.StatusPage()
+        status.set_icon_name("dialog-warning-symbolic")
+        status.set_title("Scrapy Not Installed")
+        status.set_description(
+            "Neo requires Scrapy to function.\n"
+            "Please ensure Scrapy wheels were installed correctly."
+        )
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_valign(Gtk.Align.CENTER)
+        box.append(status)
+
+        return box
 
     def ensure_scrapy_project(self):
         """Ensure Scrapy project exists"""
+
+        if not self.check_scrapy_installation():
+            print("❌ Scrapy not found in Python path!")
+            return
+
         if not self.project_path.exists():
             print("🕷️  Creating Scrapy project...")
             self.project_path.parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                subprocess.run([
-                    "scrapy", "startproject", "neo_spiders",
+                result = subprocess.run([
+                    sys.executable, '-m', 'scrapy',
+                    'startproject', 'neo_spiders',
                     str(self.project_path)
-                ], check=True)
+                ], capture_output=True, text=True, check=True)
+
+                print("✅ Scrapy project created")
+
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Error creating project: {e.stderr}")
             except FileNotFoundError:
-                print("❌ Scrapy not installed! Please install: pip install scrapy")
+                print(f"❌ Python executable not found: {sys.executable}")
             except Exception as e:
-                print(f"❌ Error creating Scrapy project: {e}")
+                print(f"❌ Unexpected error: {e}")
 
     def _build_ui(self):
         """Build main interface"""
@@ -295,11 +352,10 @@ class NeoWindow(Adw.ApplicationWindow):
 
     def on_new_spider(self, button):
         """Create new spider"""
-        dialog = SpiderDialog()
-        dialog.connect("spider-created", self.on_spider_created)
+        dialog = SpiderDialog(callback=self.on_spider_created, transient_for=self)
         dialog.present()
 
-    def on_spider_created(self, dialog, spider_config):
+    def on_spider_created(self, spider_config):
         """Callback when spider is created"""
         spider_code = self._generate_spider_code(spider_config)
 
@@ -413,8 +469,9 @@ class {config['class_name']}(scrapy.Spider):
 
         def run_spider():
             try:
+                # Usar python -m scrapy
                 process = subprocess.Popen(
-                    ["scrapy", "crawl", spider['name']],
+                    [sys.executable, '-m', 'scrapy', 'crawl', spider['name']],
                     cwd=str(self.project_path / "neo_spiders"),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -429,9 +486,9 @@ class {config['class_name']}(scrapy.Spider):
 
                 print(f"✅ Crawl finished: {spider['name']}")
                 if stdout:
-                    print(stdout)
+                    print("Output:", stdout[:500])  # Primeiros 500 chars
                 if stderr:
-                    print("Errors:", stderr)
+                    print("Errors:", stderr[:500])
 
                 if spider['name'] in self.active_crawls:
                     del self.active_crawls[spider['name']]
@@ -440,6 +497,9 @@ class {config['class_name']}(scrapy.Spider):
                 GLib.idle_add(self._load_results, spider)
                 GLib.idle_add(self.show_toast, f"Crawl '{spider['name']}' finished")
 
+            except FileNotFoundError as e:
+                print(f"❌ Command not found: {e}")
+                GLib.idle_add(self.show_toast, "Python or Scrapy not found")
             except Exception as e:
                 print(f"❌ Error running spider: {e}")
                 GLib.idle_add(self.show_toast, f"Error: {e}")
@@ -493,6 +553,7 @@ class {config['class_name']}(scrapy.Spider):
         results_file = self.project_path / "neo_spiders" / f"results_{spider['name']}.jsonl"
 
         if not results_file.exists():
+            print(f"⚠️  No results file found: {results_file}")
             return
 
         items = []
@@ -513,7 +574,7 @@ class {config['class_name']}(scrapy.Spider):
 
     def on_settings(self, action, param):
         """Open Scrapy settings dialog"""
-        dialog = ScrapySettingsDialog()
+        dialog = ScrapySettingsDialog(transient_for=self)
         dialog.present()
 
     def on_export_results(self, button):
@@ -573,4 +634,4 @@ class {config['class_name']}(scrapy.Spider):
 
         except Exception as e:
             print(f"❌ Export error: {e}")
-            self.show_toast(f"Export failed: {e}")                    
+            self.show_toast(f"Export failed: {e}")

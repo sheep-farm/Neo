@@ -1,24 +1,5 @@
 #!@PYTHON@
 
-# neo.in
-#
-# Copyright 2025 Flávio de Vasconcellos Corrêa
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-#
-# SPDX-License-Identifier: GPL-3.0-or-later
-
 import os
 import sys
 import signal
@@ -29,14 +10,31 @@ VERSION = '@VERSION@'
 pkgdatadir = '@pkgdatadir@'
 localedir = '@localedir@'
 
+# Adicionar site-packages ao path
+site_packages = os.path.join('@prefix@', 'lib', 'python3.12', 'site-packages')
+if os.path.exists(site_packages):
+    sys.path.insert(0, site_packages)
+
 sys.path.insert(1, pkgdatadir)
 signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 locale.bindtextdomain('neo', localedir)
 locale.textdomain('neo')
 gettext.install('neo', localedir)
 
+# Verificar se Scrapy está disponível
+try:
+    import scrapy
+except ImportError:
+    print("ERROR: Scrapy not found!", file=sys.stderr)
+    print("Please ensure Scrapy wheels were installed correctly.", file=sys.stderr)
+    sys.exit(1)
+
 if __name__ == '__main__':
     import gi
+
+    gi.require_version('Gtk', '4.0')
+    gi.require_version('Adw', '1')
 
     from gi.repository import Gio
     resource = Gio.Resource.load(os.path.join(pkgdatadir, 'neo.gresource'))
