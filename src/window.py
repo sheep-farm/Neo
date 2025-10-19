@@ -35,6 +35,9 @@ class NeoWindow(Adw.ApplicationWindow):
         self.project_path = Path.home() / ".config" / "neo" / "scrapy_project"
         self.ensure_scrapy_project()
 
+        # Limpar spiders inválidos
+        self.clean_invalid_spiders()
+
         # Estado
         self.spiders = []
         self.active_crawls = {}
@@ -96,6 +99,104 @@ class NeoWindow(Adw.ApplicationWindow):
 
         return box
 
+    def verify_scrapy_project(self):
+        """Verify and fix Scrapy project structure"""
+
+        project_dir = self.project_path / "neo_spiders"
+
+        # Verificar se scrapy.cfg existe no diretório pai
+        scrapy_cfg = self.project_path / "scrapy.cfg"
+
+        if not scrapy_cfg.exists():
+            print("⚠️  scrapy.cfg not found, creating...")
+
+            cfg_content = """[settings]
+default = neo_spiders.settings
+
+[deploy]
+project = neo_spiders
+"""
+            scrapy_cfg.write_text(cfg_content)
+            print("✅ Created scrapy.cfg")
+
+        # Verificar settings.py
+        settings_file = project_dir / "settings.py"
+        if not settings_file.exists():
+            print("⚠️  settings.py not found, creating...")
+
+            settings_content = """# Scrapy settings for neo_spiders project
+
+BOT_NAME = "neo_spiders"
+
+SPIDER_MODULES = ["neo_spiders.spiders"]
+NEWSPIDER_MODULE = "neo_spiders.spiders"
+
+# Obey robots.txt rules
+ROBOTSTXT_OBEY = True
+
+# Configure maximum concurrent requests
+CONCURRENT_REQUESTS = 16
+
+# Configure a delay for requests
+DOWNLOAD_DELAY = 0
+
+# User agent
+USER_AGENT = "Neo/1.0 (+https://github.com/user/neo)"
+
+# AutoThrottle extension
+AUTOTHROTTLE_ENABLED = True
+AUTOTHROTTLE_START_DELAY = 1
+AUTOTHROTTLE_MAX_DELAY = 10
+
+# HTTP Cache
+HTTPCACHE_ENABLED = True
+HTTPCACHE_EXPIRATION_SECS = 86400
+HTTPCACHE_DIR = "httpcache"
+
+REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+FEED_EXPORT_ENCODING = "utf-8"
+"""
+            settings_file.write_text(settings_content)
+            print("✅ Created settings.py")
+
+        # Verificar __init__.py em spiders
+        spiders_init = project_dir / "spiders" / "__init__.py"
+        if not spiders_init.exists():
+            spiders_init.parent.mkdir(parents=True, exist_ok=True)
+            spiders_init.write_text("# This package contains spiders\n")
+            print("✅ Created spiders/__init__.py")
+
+        # Verificar __init__.py no projeto
+        project_init = project_dir / "__init__.py"
+        if not project_init.exists():
+            project_init.write_text("")
+            print("✅ Created neo_spiders/__init__.py")
+
+    def clean_invalid_spiders(self):
+        """Remove spider files with invalid names (spaces, etc)"""
+        spiders_dir = self.project_path / "neo_spiders" / "spiders"
+
+        if not spiders_dir.exists():
+            return
+
+        cleaned = []
+        for spider_file in spiders_dir.glob("*.py"):
+            if spider_file.name == "__init__.py":
+                continue
+
+            # Verificar se o nome do arquivo tem espaços ou caracteres inválidos
+            if ' ' in spider_file.name or not spider_file.stem.replace('_', '').isalnum():
+                print(f"🗑️  Removing invalid spider file: {spider_file.name}")
+                try:
+                    spider_file.unlink()
+                    cleaned.append(spider_file.name)
+                except Exception as e:
+                    print(f"   Error removing: {e}")
+
+        if cleaned:
+            print(f"✅ Cleaned {len(cleaned)} invalid spider(s)")
+
     def ensure_scrapy_project(self):
         """Ensure Scrapy project exists"""
 
@@ -122,6 +223,9 @@ class NeoWindow(Adw.ApplicationWindow):
                 print(f"❌ Python executable not found: {sys.executable}")
             except Exception as e:
                 print(f"❌ Unexpected error: {e}")
+
+        # Verificar e corrigir estrutura
+        self.verify_scrapy_project()
 
     def _build_ui(self):
         """Build main interface"""
@@ -352,22 +456,62 @@ class NeoWindow(Adw.ApplicationWindow):
 
     def on_new_spider(self, button):
         """Create new spider"""
-        dialog = SpiderDialog(callback=self.on_spider_created, transient_for=self)
+        dialog = SpiderDialog(callback=self.on_spider_created)
         dialog.present()
 
     def on_spider_created(self, spider_config):
         """Callback when spider is created"""
+
+        # Validar nome (sem espaços) - CRÍTICO
+        original_name = spider_config['name']
+
+        # Converter para snake_case válido
+        safe_name = original_name.lower()
+        safe_name = safe_name.replace(' ', '_')
+        safe_name = safe_name.replace('-', '_')
+
+        # Remover caracteres especiais, manter apenas letras, números e _
+        safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '_')
+
+        # Garantir que começa com letra
+        if safe_name and not safe_name[0].isalpha():
+            safe_name = 'spider_' + safe_name
+
+        # Verificar se nome é válido
+        if not safe_name:
+            self.show_toast("Invalid spider name")
+            print("❌ Invalid spider name after sanitization")
+            return
+
+        if safe_name != original_name:
+            print(f"⚠️  Renamed spider: '{original_name}' → '{safe_name}'")
+            self.show_toast(f"Spider name adjusted to '{safe_name}'", timeout=5)
+
+        spider_config['name'] = safe_name
+
+        # Ajustar class name também
+        class_words = safe_name.split('_')
+        spider_config['class_name'] = ''.join(word.capitalize() for word in class_words) + 'Spider'
+
         spider_code = self._generate_spider_code(spider_config)
 
         # Save spider
         spiders_dir = self.project_path / "neo_spiders" / "spiders"
         spiders_dir.mkdir(parents=True, exist_ok=True)
 
-        spider_file = spiders_dir / f"{spider_config['name']}.py"
+        spider_file = spiders_dir / f"{safe_name}.py"
+
+        # Verificar se já existe
+        if spider_file.exists():
+            self.show_toast(f"Spider '{safe_name}' already exists")
+            print(f"⚠️  Spider file already exists: {spider_file}")
+            return
+
         spider_file.write_text(spider_code)
 
-        print(f"✅ Spider created: {spider_config['name']}")
-        self.show_toast(f"Spider '{spider_config['name']}' created successfully")
+        print(f"✅ Spider created: {safe_name}")
+        print(f"   File: {spider_file}")
+        self.show_toast(f"Spider '{safe_name}' created successfully")
 
         # Save config
         self.neo_settings.save_spider_config(spider_config)
@@ -469,10 +613,16 @@ class {config['class_name']}(scrapy.Spider):
 
         def run_spider():
             try:
+                # Diretório de trabalho deve ser o PAI do neo_spiders
+                work_dir = str(self.project_path)
+
+                print(f"📂 Working directory: {work_dir}")
+                print(f"🕷️  Spider name: {spider['name']}")
+
                 # Usar python -m scrapy
                 process = subprocess.Popen(
                     [sys.executable, '-m', 'scrapy', 'crawl', spider['name']],
-                    cwd=str(self.project_path / "neo_spiders"),
+                    cwd=work_dir,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True
@@ -486,9 +636,12 @@ class {config['class_name']}(scrapy.Spider):
 
                 print(f"✅ Crawl finished: {spider['name']}")
                 if stdout:
-                    print("Output:", stdout[:500])  # Primeiros 500 chars
-                if stderr:
-                    print("Errors:", stderr[:500])
+                    print("Output:", stdout[:1000])
+                if stderr and 'Traceback' not in stderr:
+                    # Só mostrar stderr se não for erro
+                    print("Scrapy log:", stderr[:500])
+                elif 'Traceback' in stderr:
+                    print("❌ Error:", stderr[:1000])
 
                 if spider['name'] in self.active_crawls:
                     del self.active_crawls[spider['name']]
@@ -550,31 +703,56 @@ class {config['class_name']}(scrapy.Spider):
 
     def _load_results(self, spider):
         """Load spider results"""
-        results_file = self.project_path / "neo_spiders" / f"results_{spider['name']}.jsonl"
+        # Arquivo fica no diretório do projeto
+        results_file = self.project_path / f"results_{spider['name']}.jsonl"
+
+        print(f"📂 Looking for results: {results_file}")
 
         if not results_file.exists():
-            print(f"⚠️  No results file found: {results_file}")
+            print(f"⚠️  No results file found")
+            self.show_toast("No results found - check if spider ran correctly")
+
+            # Mostrar mensagem no view
+            buffer = self.results_view.get_buffer()
+            buffer.set_text("// No results file found\n// Spider may have failed or found no items")
+            self.view_stack.set_visible_child_name("results")
             return
 
         items = []
-        with open(results_file, 'r') as f:
-            for line in f:
-                try:
-                    items.append(json.loads(line))
-                except:
-                    pass
+        try:
+            with open(results_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        items.append(json.loads(line))
+                    except Exception as e:
+                        print(f"⚠️  Failed to parse line: {e}")
+        except Exception as e:
+            print(f"❌ Error reading results: {e}")
+            self.show_toast(f"Error reading results: {e}")
+            return
+
+        if not items:
+            print("⚠️  No items extracted")
+            self.show_toast("No items were extracted - check selectors")
+
+            # Mostrar mensagem vazia no view
+            buffer = self.results_view.get_buffer()
+            buffer.set_text("// No items extracted\n// Check if CSS selectors are correct")
+            self.view_stack.set_visible_child_name("results")
+            return
 
         buffer = self.results_view.get_buffer()
         results_text = json.dumps(items, indent=2, ensure_ascii=False)
         buffer.set_text(results_text)
 
         print(f"📦 Loaded {len(items)} items from {spider['name']}")
+        self.show_toast(f"Loaded {len(items)} items")
 
         self.view_stack.set_visible_child_name("results")
 
     def on_settings(self, action, param):
         """Open Scrapy settings dialog"""
-        dialog = ScrapySettingsDialog(transient_for=self)
+        dialog = ScrapySettingsDialog()
         dialog.present()
 
     def on_export_results(self, button):
@@ -594,6 +772,8 @@ class {config['class_name']}(scrapy.Spider):
 
         filters = Gio.ListStore.new(Gtk.FileFilter)
 
+        json_filter = Gtk.FileFilter()
+        json_filter.set_name
         json_filter = Gtk.FileFilter()
         json_filter.set_name("JSON files")
         json_filter.add_pattern("*.json")

@@ -25,8 +25,11 @@ class NeoSettings:
         if not self.spiders_file.exists():
             return []
 
-        with open(self.spiders_file, 'r') as f:
-            return json.load(f)
+        try:
+            with open(self.spiders_file, 'r') as f:
+                return json.load(f)
+        except:
+            return []
 
     def save_scrapy_settings(self, settings):
         """Save Scrapy settings"""
@@ -47,5 +50,8 @@ class NeoSettings:
         if not self.settings_file.exists():
             return default_settings
 
-        with open(self.settings_file, 'r') as f:
-            return json.load(f)
+        try:
+            with open(self.settings_file, 'r') as f:
+                return json.load(f)
+        except:
+            return default_settings

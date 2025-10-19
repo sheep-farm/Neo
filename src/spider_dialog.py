@@ -1,18 +1,16 @@
-from gi.repository import Gtk, Adw, GLib, GObject
+from gi.repository import Gtk, Adw, GLib
 from datetime import datetime
 
 from .field_dialog import FieldDialog
 
+
 class SpiderDialog(Adw.Dialog):
     """Dialog for creating new spider"""
 
-    __gsignals__ = {
-        'spider-created': (GObject.SignalFlags.RUN_FIRST, None, (object,))
-    }
-
-    def __init__(self, **kwargs):
+    def __init__(self, callback, **kwargs):
         super().__init__(**kwargs)
 
+        self.callback = callback
         self.set_title("New Spider")
         self.set_content_width(600)
         self.set_content_height(550)
@@ -57,6 +55,19 @@ class SpiderDialog(Adw.Dialog):
         self.name_row.set_title("Spider Name")
         self.name_row.get_delegate().set_placeholder_text("my_spider")
         basic_group.add(self.name_row)
+
+        # Hint sobre naming
+        name_hint = Gtk.Label()
+        name_hint.set_markup("<small>Use lowercase letters, numbers, and underscores only</small>")
+        name_hint.add_css_class("dim-label")
+        name_hint.set_halign(Gtk.Align.START)
+        name_hint.set_margin_start(12)
+        name_hint.set_margin_bottom(6)
+
+        # Adicionar hint como widget separado
+        hint_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        hint_box.append(name_hint)
+        basic_group.add(hint_box)
 
         self.start_url_row = Adw.EntryRow()
         self.start_url_row.set_title("Start URL")
@@ -112,11 +123,10 @@ class SpiderDialog(Adw.Dialog):
 
     def on_add_field(self, button):
         """Add new field"""
-        dialog = FieldDialog(transient_for=self.get_root())
-        dialog.connect("field-added", self.on_field_added)
+        dialog = FieldDialog(callback=self.on_field_added)
         dialog.present()
 
-    def on_field_added(self, dialog, field_data):
+    def on_field_added(self, field_data):
         """Callback when field is added"""
         self.fields.append(field_data)
 
@@ -141,20 +151,30 @@ class SpiderDialog(Adw.Dialog):
 
     def on_create_clicked(self, button):
         """Create spider"""
-        name = self.name_row.get_text()
-        start_url = self.start_url_row.get_text()
-        domain = self.domain_row.get_text()
-        item_selector = self.selector_row.get_text()
+        name = self.name_row.get_text().strip()
+        start_url = self.start_url_row.get_text().strip()
+        domain = self.domain_row.get_text().strip()
+        item_selector = self.selector_row.get_text().strip()
 
         if not all([name, start_url, domain, item_selector]):
             print("❌ Fill all fields")
             return
 
-        class_name = ''.join(word.capitalize() for word in name.split('_'))
+        # Validar nome do spider
+        safe_name = name.lower().replace(' ', '_').replace('-', '_')
+        safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '_')
+
+        if not safe_name or not safe_name[0].isalpha():
+            print("❌ Invalid spider name")
+            return
+
+        # Class name (CamelCase)
+        class_words = safe_name.split('_')
+        class_name = ''.join(word.capitalize() for word in class_words) + 'Spider'
 
         spider_config = {
-            'name': name,
-            'class_name': class_name + 'Spider',
+            'name': safe_name,
+            'class_name': class_name,
             'start_urls': [start_url],
             'allowed_domains': [domain],
             'item_selector': item_selector,
@@ -162,5 +182,6 @@ class SpiderDialog(Adw.Dialog):
             'created': datetime.now().isoformat()
         }
 
-        self.emit('spider-created', spider_config)
+        if self.callback:
+            self.callback(spider_config)
         self.close()

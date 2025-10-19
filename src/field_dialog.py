@@ -1,16 +1,13 @@
-from gi.repository import Gtk, Adw, GLib, GObject
+from gi.repository import Gtk, Adw
 
 
 class FieldDialog(Adw.Dialog):
     """Dialog for adding field to spider"""
 
-    __gsignals__ = {
-        'field-added': (GObject.SignalFlags.RUN_FIRST, None, (object,))
-    }
-
-    def __init__(self, **kwargs):
+    def __init__(self, callback, **kwargs):
         super().__init__(**kwargs)
 
+        self.callback = callback
         self.set_title("Add Field")
         self.set_content_width(450)
         self.set_content_height(300)
@@ -66,5 +63,6 @@ class FieldDialog(Adw.Dialog):
         }
 
         if field_data['name'] and field_data['selector']:
-            self.emit('field-added', field_data)
+            if self.callback:
+                self.callback(field_data)
             self.close()
