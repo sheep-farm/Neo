@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="neo">
-  <schema id="com.github.youruser.Neo" path="/com/github/youruser/Neo/">
+  <schema id="com.github.sheepfarm.Neo" path="/com/github/sheepfarm/Neo/">
     <key name="window-width" type="i">
       <default>1000</default>
       <summary>Window width</summary>
